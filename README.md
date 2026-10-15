@@ -33,3 +33,19 @@ Ajustes → Capacidades → Skills, o cópiala a `~/.claude/skills/flexsim-model
 
 Python 3 y FlexSim instalado (para `flexsim_check.py`, `prueba_humo.py` y `replicas.py`, que usan FlexSimPy;
 ver `references/flexsimpy.md`). El resto funciona sin FlexSim.
+
+## Licencia
+
+[MIT](LICENSE).
+
+## Créditos y licencias de terceros
+
+- **[FlexSimPy](https://github.com/flexsim/FlexSimPy)** — © 2022 FlexSim Software Products Inc., licencia MIT.
+  Este repositorio **no incluye** su código: `scripts/flexsim_check.py` lo importa en ejecución desde la
+  carpeta donde cada usuario lo haya compilado (ver `references/flexsimpy.md`).
+- **FlexSim** y su SDK (cabeceras y librerías necesarias para compilar FlexSimPy) son software propietario de
+  FlexSim Software Products Inc. / Autodesk. No se incluyen ni se redistribuyen; hace falta una instalación
+  de FlexSim con licencia propia para usar los scripts que lo ejecutan.
+- La documentación oficial de FlexSim es propiedad de sus autores; esta skill solo la consulta
+  (`scripts/flexhelp.py`) y resume comandos y sintaxis con palabras propias.
+- Proyecto independiente, sin afiliación ni respaldo de FlexSim ni de Autodesk. FlexSim es marca de sus titulares.
