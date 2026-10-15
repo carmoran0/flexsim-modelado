@@ -1,0 +1,20 @@
+{
+  "name": "flexsim-modelado",
+  "version": "1.0.0",
+  "description": "Skill para construir, verificar y simular modelos FlexSim mediante scripts FlexScript (objetos, cintas, operarios, plano 2D, muros A*), con comprobación en FlexSim real vía FlexSimPy. En español.",
+  "author": {
+    "name": "CaloS",
+    "url": "https://github.com/carmoran0"
+  },
+  "license": "MIT",
+  "keywords": [
+    "flexsim",
+    "flexscript",
+    "simulation",
+    "logistics",
+    "warehouse",
+    "spanish"
+  ],
+  "homepage": "https://github.com/carmoran0/flexsim-modelado",
+  "repository": "https://github.com/carmoran0/flexsim-modelado"
+}

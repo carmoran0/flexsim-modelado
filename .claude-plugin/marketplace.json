@@ -1,0 +1,20 @@
+{
+  "name": "flexsim-modelado",
+  "owner": {
+    "name": "CaloS",
+    "url": "https://github.com/carmoran0"
+  },
+  "description": "Skill de Claude para modelado en FlexSim por script (en español)",
+  "plugins": [
+    {
+      "name": "flexsim-modelado",
+      "description": "Construye, verifica y simula modelos FlexSim mediante scripts FlexScript, con comprobación en FlexSim real vía FlexSimPy.",
+      "version": "1.0.0",
+      "license": "MIT",
+      "source": "./",
+      "category": "development",
+      "homepage": "https://github.com/carmoran0/flexsim-modelado",
+      "repository": "https://github.com/carmoran0/flexsim-modelado"
+    }
+  ]
+}
