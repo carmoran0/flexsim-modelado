@@ -44,8 +44,7 @@ Ejemplo mínimo:
 
 Clases de los objetos visuales y de A* (ver references/api.md):
 - Suelos y paredes: "VisualTool" con la propiedad VisualDisplay = "Plane" / "Cube"
-  (nombre de clase SIN VERIFICAR por ejecución: si falla, crea un Plane en la GUI y lee
-  getProperty("Class")).
+  (clase verificada por ejecución con FlexSimPy).
 - Muros lógicos: "AStar::Divider" dentro de "AStar::AStarNavigator" (nombres leídos del
   código fuente del módulo A*, github.com/flexsim/AStar). PathPoints en coordenadas del
   navegador, que se deja en (0,0,0).

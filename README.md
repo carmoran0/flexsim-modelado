@@ -34,6 +34,25 @@ Ajustes → Capacidades → Skills, o cópiala a `~/.claude/skills/flexsim-model
 Python 3 y FlexSim instalado (para `flexsim_check.py`, `prueba_humo.py` y `replicas.py`, que usan FlexSimPy;
 ver `references/flexsimpy.md`). El resto funciona sin FlexSim.
 
+## Verificación rápida
+
+Sin FlexSim (solo análisis estático, cualquier SO):
+
+```bash
+python scripts/check_script.py mi_escena.flexscript
+```
+
+Con FlexSim 2027 en Windows y FlexSimPy compilado (`references/flexsimpy.md`):
+
+```bash
+set FLEXSIMPY_DIR=C:/ruta/FlexSimPy/out/Rel_3_12
+set FLEXSIM_BASE_MODEL=C:/ruta/FlexSimPy/TestFlexSimPy/PostOfficeModel.fsm
+py -3.12 scripts/prueba_humo.py
+```
+
+La prueba de humo (~30 s) construye una escena mínima, la simula y comprueba comportamiento
+(operarios, FEFO, semillas, vigilante de interbloqueos). Probada desde un clon limpio con FlexSim 2027.
+
 ## Licencia
 
 [MIT](LICENSE).

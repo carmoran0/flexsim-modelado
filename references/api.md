@@ -185,7 +185,7 @@ switch while`. Ojo con `ne` y `eq` como abreviaturas («n.º de excursiones»). 
 
 | Tarea | API | Nota |
 |---|---|---|
-| Suelo coloreado / pared 3D | `Object.create("VisualTool")` + `setProperty("VisualDisplay", "Plane")` o `"Cube"` | opciones de VisualDisplay (ayuda): Plane, Cube, Column, Sphere, Imported Shape, Text, Presentation Slide. El nombre de clase **«VisualTool» no está verificado** (los objetos Plane/Shape/Text de la librería son instancias de esa clase): si falla, lee `getProperty("Class")` de un Plane creado en la GUI |
+| Suelo coloreado / pared 3D | `Object.create("VisualTool")` + `setProperty("VisualDisplay", "Plane")` o `"Cube"` | opciones de VisualDisplay (ayuda): Plane, Cube, Column, Sphere, Imported Shape, Text, Presentation Slide. Clase **«VisualTool» verificada por ejecución** (FlexSimPy) |
 | Tamaño, posición, color | `setSize(x, y, z)`, `setLocation(cx, cy, 0, 0.5, 0.5, 0)`, `o.color = Color(r, g, b[, a])` | `Color(r,g,b,a)` es constructor documentado (componentes 0-1). Pared alineada con x: tamaño (largo, grosor, alto) |
 | Rótulo visible | `setProperty("ShowName", 1)` | muestra el nombre del objeto en 3D |
 | Propiedades de VisualTool | `VisualDisplay`, `Texture`, `TextureXRepeat`, `TextureYRepeat`, `Luminous`, `TextDisplay`, `TextSize`, `PolygonOffsetFactor/Units`, `BillboardMode` | |

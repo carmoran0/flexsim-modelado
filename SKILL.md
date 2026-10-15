@@ -17,7 +17,7 @@ correcto y no lo es.
 | Archivo | Cuándo leerlo |
 |---|---|
 | `references/api.md` | antes de escribir cualquier comando o propiedad: API verificada, propiedades por clase, distribuciones, obsoletos, dónde está la ayuda |
-| `references/patrones.md` | al construir: orden de bloques, colocación, cintas, conexiones, recursos, lógica por propiedades *Code* y triggers, §10 operación realista (balance de capacidad, lotes, stock, pedidos que tiran del stock, FEFO, KPIs), §11 patrones listos del generador y §12 validar resultados (vigilante, réplicas, prueba de humo) |
+| `references/patrones.md` | al construir: orden de bloques, colocación, cintas, conexiones, recursos, lógica por propiedades *Code* y triggers, §10 operación realista (balance de capacidad, lotes, stock, pedidos que tiran del stock, FEFO, KPIs), §11 patrones listos del generador §12 validar resultados (vigilante, réplicas, prueba de humo) y §13 estaciones reservadas y cadena de custodia |
 | `references/automatizacion.md` | cuando algo «queda para la GUI» o el usuario pide simplificar: `executefsfile`, generador, Model Parameters/Experimenter, llegadas por turnos, SQL sobre objetos, CSV/Excel, A\*, Lists |
 | `references/errores.md` | cuando el usuario trae un error o un síntoma raro |
 | `scripts/generar_escena.py` | escenas de más de unos pocos objetos: describes la escena en Python (objetos, colocación en x/y, cintas, zonas, paredes, muros A\*, conexiones, propiedades, triggers y variables internas) y genera el script completo, la limpieza, un `.fs` por bloque, las líneas `executefsfile` y el plano 2D (SVG con rótulos y PNG de fondo) |
