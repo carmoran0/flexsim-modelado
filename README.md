@@ -1,5 +1,7 @@
 # flexsim-modelado
 
+![flexsim-modelado: skill de Claude para construir y verificar modelos FlexSim](docs/social-preview.png)
+
 > *Claude skill for building and verifying FlexSim models via FlexScript. Documentation and prompts are in Spanish; not tested in English.*
 
 Skill de Claude para construir modelos de [FlexSim](https://www.flexsim.com/) mediante scripts FlexScript
