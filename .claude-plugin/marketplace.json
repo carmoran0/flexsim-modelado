@@ -9,7 +9,7 @@
     {
       "name": "flexsim-modelado",
       "description": "Construye, verifica y simula modelos FlexSim mediante scripts FlexScript, con comprobación en FlexSim real vía FlexSimPy.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "license": "MIT",
       "source": "./",
       "category": "development",

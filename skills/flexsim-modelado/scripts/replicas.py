@@ -12,6 +12,8 @@ Opciones:
                         vez se han visto *segmentation fault*: por defecto, de uno en uno)
     --precision 0.05    semiancho relativo deseado del IC; avisa de cuántas réplicas harían falta
     --confianza 0.95    0.90, 0.95 o 0.99
+    --timeout 900       segundos por réplica; si los pasa, se para el proceso con sus hijos (FlexSim)
+                        y cuenta como réplica fallida
     --salida res.json   todo: réplicas, resumen y comparación
     --csv res.csv       una fila por réplica y KPI
 
@@ -28,6 +30,7 @@ import io
 import json
 import math
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -84,21 +87,40 @@ def resumen(valores, conf, precision):
             "min": min(valores), "max": max(valores)}
 
 
+def _matar(p):
+    """Para el proceso y sus hijos. En Windows matar el shell deja vivo al ejecutor (y a FlexSim),
+    que además mantiene abiertas las tuberías: communicate() esperaría a que acabase."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(p.pid)], capture_output=True)
+    else:
+        os.killpg(p.pid, signal.SIGKILL)
+
+
 def una(cmd, semilla, reintentos=1, timeout=None):
     for intento in range(reintentos + 1):
         fd, tmp = tempfile.mkstemp(suffix=".json")
         os.close(fd)
         os.remove(tmp)
         t = time.time()
-        p = subprocess.run(cmd.format(semilla=semilla, json=tmp), shell=True, capture_output=True,
-                           text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        p = subprocess.Popen(cmd.format(semilla=semilla, json=tmp), shell=True, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                             start_new_session=os.name != "nt")
         try:
-            datos = json.load(io.open(tmp, encoding="utf-8"))
-            os.remove(tmp)
+            salida, error = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _matar(p)
+            salida, error = p.communicate()
+            error = (error or "") + "\nsuperó --timeout (%g s): proceso parado" % timeout
+        try:
+            with io.open(tmp, encoding="utf-8") as f:
+                datos = json.load(f)
             return {"semilla": semilla, "kpi": aplanar(datos) if isinstance(datos, dict) else {},
                     "s": round(time.time() - t, 1), "intentos": intento + 1}
         except (OSError, ValueError):
-            err = (p.stderr or p.stdout or "")[-600:]
+            err = (error or salida or "")[-600:]
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
     return {"semilla": semilla, "error": "sin JSON (código %s): %s" % (p.returncode, err.strip())}
 
 
@@ -194,7 +216,7 @@ def main(argv):
             if len(d) < 2:
                 continue
             s = resumen(d, a.confianza, a.precision)
-            mA = sum(ra["kpi"][k] for ra, rb in parejas if k in ra["kpi"]) / len(d)
+            mA = sum(ra["kpi"][k] for ra, rb in parejas if k in ra["kpi"] and k in rb["kpi"]) / len(d)
             sig = s["ic"] is not None and (s["media"] - s["ic"] > 0 or s["media"] + s["ic"] < 0)
             s["significativa"] = sig
             out["diferencia_B_menos_A"][k] = s

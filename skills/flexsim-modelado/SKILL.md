@@ -24,7 +24,7 @@ correcto y no lo es.
 | `scripts/check_script.py` | siempre, antes de entregar (incluye nombres de variable prohibidos) |
 | `scripts/flexsim_check.py` + `references/flexsimpy.md` | si hay FlexSim instalado (Windows): construye el script en FlexSim real sin interfaz, verifica bloques, propiedades, posiciones y A\*, simula y guarda el .fsm. Léelo antes de decir «no puedo ejecutar FlexSim» |
 | `scripts/replicas.py` | siempre que des cifras de una simulación estocástica: N réplicas con semillas distintas, IC, réplicas necesarias y comparación pareada de escenarios (`--comparar`) |
-| `scripts/prueba_humo.py` | tras tocar los scripts del skill o en una instalación nueva: comprueba en ~45 s, en FlexSim real, que los patrones dan el comportamiento esperado y que el vigilante detecta un interbloqueo |
+| `scripts/prueba_humo.py` | tras tocar los scripts del skill o en una instalación nueva: comprueba en ~30 s, en FlexSim real, que los patrones dan el comportamiento esperado y que el vigilante detecta un interbloqueo |
 | `scripts/flexhelp.py` | para consultar comandos globales en la ayuda instalada |
 
 ## Flujo de trabajo
@@ -47,7 +47,9 @@ correcto y no lo es.
    (references/flexsimpy.md: compilar FlexSimPy una vez, modelo base, opciones). Corrige la causa
    en el generador y repite hasta que todos los bloques den OK, las posiciones coincidan con el
    plano y la simulación avance **sin alarmas del vigilante** (`--vigilar 3600`: interbloqueos,
-   atascos, colas que crecen). Entrega también el .fsm guardado.
+   atascos, colas que crecen). Juzga por la última línea («Resultado: OK») o por `fallos` del
+   `--json`, nunca por el código de salida (FlexSim falla al cerrarse). Entrega también el .fsm
+   guardado.
 4c. **Si das cifras, da réplicas.** Ejecutor con `--semilla` + `scripts/replicas.py` (10 réplicas
    por defecto): media ± IC. Para comparar escenarios, `--comparar` con las mismas semillas; una
    diferencia que no es significativa no es una mejora.
@@ -82,8 +84,9 @@ correcto y no lo es.
   `generar_escena.trigger`). Sin una `SendToPort` propia, todos los items van al primer destino libre.
 - **Un código que no compila falla en silencio** dentro de un campo Code o un trigger: el objeto
   simplemente no hace nada. Causa típica: una variable con nombre de comando (`ne`, `eq`, `local`,
-  `param`, `setitem`...). `check_script.py` (comprobación 10) lo detecta y `flexsim_check.py`
-  compila cada campo por separado.
+  `param`, `setitem`...) o con tildes (`cámara`: FlexScript solo admite identificadores ASCII).
+  `check_script.py` (comprobaciones 10 y 11) lo detecta y `flexsim_check.py` compila cada campo
+  por separado.
 - **Un puesto con operarios = un Processor de capacidad 1.** Con `MaxContent` > 1 y operarios de
   proceso, los operarios se quedan enganchados (medido). Varios puestos = varios objetos.
   Usa los patrones del generador (`e.equipo`, `e.puestos`, `e.estacion_fefo`, `e.separador_lote`,

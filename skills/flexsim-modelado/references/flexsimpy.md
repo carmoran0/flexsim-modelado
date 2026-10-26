@@ -125,9 +125,15 @@ Hace, en orden:
 6. Guarda con `savebyname`.
 7. Hace reset (y siembra con `--semilla`) y `runToTime`, y saca entradas, salidas y contenido
    de cada objeto de flujo. Con `--vigilar N` simula a trozos de N s y avisa de interbloqueos,
-   atascos y colas que crecen (§9); una alarma cuenta como fallo en el código de salida.
+   atascos y colas que crecen (§9); una alarma cuenta como fallo.
 
-Las variables `FLEXSIMPY_DIR` y `FLEXSIM_BASE_MODEL` evitan repetir `--fspy` y `--base`. FlexSim
+Termina con «Resultado: OK» o «Resultado: N fallos», y `--json` guarda el total en `fallos`
+(bloques que fallan o ninguno encontrado, Code que no compilan, propiedades inexistentes, alarmas,
+cruces de recorridos). **No uses el código de salida**: al cerrar FlexSim el proceso acaba con un
+*segmentation fault* (139 en bash) aunque todo haya ido bien.
+
+Las variables `FLEXSIMPY_DIR`, `FLEXSIM_BASE_MODEL` y `FLEXSIM_PROGRAM` (carpeta `program` de
+FlexSim, si no está en la ruta por defecto) evitan repetir `--fspy`, `--base` y `--programa`. FlexSim
 cambia el directorio de trabajo al arrancar, así que la herramienta pasa todas las rutas a
 absolutas antes de lanzarlo.
 
@@ -144,6 +150,10 @@ corregir la **causa** en el generador → repetir. Entrega el .fsm guardado adem
   funciona.
 - **`setProperty` con un nombre inexistente no da error**: no hace nada. Verifícalo con
   `getProperty`.
+- **Texto con tildes a través de `evaluate()`**: FlexSimPy pasa en Latin-1 (no UTF-8) un texto
+  cuyos caracteres caben todos en Latin-1 («Cámara»), y devolver luego esa cadena lanza
+  `SystemError`. Con algún carácter fuera de Latin-1 (`—`) va bien: `Sesion.x()` añade `// —` a
+  todo texto no ASCII (errores.md #48).
 - **Tamaños por defecto** (x × y × z, m):
 
   | Clase | Tamaño |
@@ -193,8 +203,9 @@ guardar para dejar el modelo en su estado inicial. (`cmdsaveas` y `savetree` sí
   ningún otro sitio.
 - Lecturas útiles: `o.stats.state().getTotalTimeAt(STATE_IDLE)` (utilización),
   `o.stats.content.average` / `.maximum`, etiquetas con `o.find(">labels")`.
-- A veces el proceso termina con un *Segmentation fault* al cerrar FlexSim, después de haber
-  escrito los resultados. Es inofensivo si el JSON está completo.
+- El proceso termina con un *Segmentation fault* al cerrar FlexSim (6 de 6 veces medidas; ni
+  `os._exit` ni `TerminateProcess` lo evitan), después de haber escrito los resultados. Es
+  inofensivo si el JSON está completo, pero el código de salida no sirve: lee el JSON.
 
 ## 8. Semillas y réplicas
 
@@ -224,8 +235,9 @@ guardar para dejar el modelo en su estado inicial. (`cmdsaveas` y `savetree` sí
   almacén de 5 días → ATASCO de la playa de inflamables «waiting for transport» 8 h, causado por
   el rack de esa zona al 98 %.
 - `scripts/prueba_humo.py` construye una escena mínima con los patrones de patrones.md §11,
-  la simula 8 h en dos procesos (variante sana y variante rota) y comprueba 13 resultados:
-  bloques OK, códigos que compilan, llegadas, conservación de items, utilización teórica,
-  Separator, FEFO sin infracciones, vigilante limpio, reproducibilidad por semilla y que el
-  vigilante detecta la variante rota. Sin FlexSimPy solo hace la parte estática (salida 2).
-  Tarda ~45 s. Pásala tras tocar los scripts del skill.
+  la simula 8 h en dos procesos (variante sana y variante rota) y comprueba: bloques OK, códigos
+  que compilan, llegadas, conservación de items, utilización teórica, Separator, FEFO sin
+  infracciones, nombres con tilde y conexión en los dos sentidos, vigilante limpio,
+  reproducibilidad por semilla y que el vigilante detecta la variante rota. La parte estática
+  (sin FlexSim, salida 2) pasa además casos fijos del linter, de las cabeceras de bloque y de los
+  nombres repetidos del generador. Tarda ~30 s. Pásala tras tocar los scripts del skill.

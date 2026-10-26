@@ -33,6 +33,9 @@ DEPRECATED = {
     "nodeadddata": "treenode.value / treenode.dataType",
 }
 BLOCK_MARK = "\x00"
+# Cabecera de bloque "/* BLOQUE 3 - Conectar */": admite espacios de más, minúsculas y cualquier
+# separador (-, —, :). flexsim_check.py parte el script con la misma (partir_bloques).
+INICIO_BLOQUE = re.compile(r"/\*\s*BLOQUE\s*(\d+)", re.I)
 # Nombres que no se pueden declarar como variable (medido en FlexSim 2027, 13/10/2026)
 RESERVADOS = ["break", "case", "continue", "default", "else", "eq", "for", "forobjectlayerunder",
               "forobjectsbefore", "forobjectsbehind", "forobjecttreeunder", "if", "inheritcode", "iterate",
@@ -53,7 +56,7 @@ def strip(text):
             j = n if j == -1 else j + 2
             seg = text[i:j]
             keep = "\n" * seg.count("\n")          # conserva las líneas
-            if re.match(r"/\*\s*BLOQUE\s*\d+", seg):
+            if INICIO_BLOQUE.match(seg):
                 keep = BLOCK_MARK + keep            # marca dónde empieza cada bloque
             code.append(keep); blank.append(keep); i = j
         elif text.startswith("//", i):
@@ -69,6 +72,13 @@ def strip(text):
         else:
             code.append(c); blank.append(c); i += 1
     return "".join(code), "".join(blank)
+
+
+def partir_bloques(text):
+    """[(número, texto)] de cada bloque, desde su cabecera hasta la siguiente."""
+    cab = list(INICIO_BLOQUE.finditer(text))
+    fin = [m.start() for m in cab[1:]] + [len(text)]
+    return [(int(m.group(1)), text[m.start():f]) for m, f in zip(cab, fin)]
 
 
 def call_args(code, start):
@@ -108,11 +118,18 @@ def line_of(code, pos):
 def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__); return 0
-    path, existing = argv[0], set()
+    existing = set()
     if "--existing" in argv:
-        existing = {s.strip() for s in argv[argv.index("--existing") + 1].split(",") if s.strip()}
+        i = argv.index("--existing")
+        if i + 1 >= len(argv):
+            print("Falta la lista de --existing (p. ej. --existing Fresadora1,Salida)"); return 2
+        existing = {s.strip() for s in argv[i + 1].split(",") if s.strip()}
+        argv = argv[:i] + argv[i + 2:]
+    if not argv:
+        print(__doc__); return 2
+    path = argv[0]
     try:
-        raw = open(path, encoding="utf-8").read()
+        raw = open(path, encoding="utf-8-sig").read()   # -sig: un BOM no cuenta como carácter no ASCII
     except OSError as e:
         print("No se puede leer %s: %s" % (path, e)); return 2
     code, blank = strip(raw)
@@ -222,23 +239,21 @@ def main(argv):
 
     # 8. Bloques: variables locales usadas fuera del bloque donde se declararon
     # Los encabezados de bloque son comentarios: se separan sobre el texto original
-    parts = re.split(r"(?=/\*\s*BLOQUE\s*\d+)", raw)
-    blocks = [strip(p)[0] for p in parts if re.match(r"/\*\s*BLOQUE\s*\d+", p)]
+    partes = [strip(p) for _, p in partir_bloques(raw)]
+    blocks = [c for c, _ in partes]
     if len(blocks) > 1:
         decl = []   # (var, idx)
         for idx, b in enumerate(blocks):
             for m in re.finditer(r"\b" + TYPES + r"\s+(\w+)\s*=", b):
                 decl.append((m.group(1), idx))
         leaks = []
-        blancos = [strip(b)[1] for b in blocks]       # una vez por bloque (antes: O(variables x bloques))
+        # Identificadores de cada bloque, una sola pasada (antes: una búsqueda por variable y bloque,
+        # 4 de los 5 s del linter en una escena de 250 conexiones)
+        usados = [set(re.findall(r"(?<![\w.\"])(\w+)\b(?!\s*\")", b)) for _, b in partes]
         propias = set(decl)
         for var, di in sorted(propias, key=lambda d: d[1]):
-            patron = re.compile(r"(?<![\w.\"])" + re.escape(var) + r"\b(?!\s*\")")
-            for idx, b in enumerate(blancos):
-                if idx == di:
-                    continue
-                own = (var, idx) in propias
-                if not own and patron.search(b):
+            for idx, u in enumerate(usados):
+                if idx != di and (var, idx) not in propias and var in u:
                     leaks.append("'%s' (declarada en bloque %d, usada en bloque %d)" % (var, di + 1, idx + 1))
         add("WARN" if leaks else "PASS", "8. Bloques independientes",
             " | ".join(sorted(set(leaks))) if leaks else "%d bloques, sin variables compartidas" % len(blocks))
@@ -280,7 +295,7 @@ def main(argv):
     # 10. Variables con nombre reservado: FlexScript no compila y, dentro de un campo Code o de un
     # trigger, el fallo es silencioso (el código no se ejecuta). Lista MEDIDA en FlexSim 2027
     # declarando "int <comando> = 1;" para los 1.214 comandos de Commands.xml.
-    texto = raw.replace('\\"', '"')     # también dentro de las cadenas de código (Code, triggers)
+    texto = code.replace('\\"', '"')    # sin comentarios, pero también dentro de las cadenas de código
     malos = []
     for m in re.finditer(r"\b%s\s+(%s)\s*(?:=|;|,)" % (TYPES, "|".join(RESERVADOS)), texto):
         malos.append("línea %d: '%s'" % (texto.count("\n", 0, m.start()) + 1, m.group(1)))
@@ -289,6 +304,15 @@ def main(argv):
             " — FlexScript no lo compila (en un Code/trigger falla sin avisar): renómbrala")
     else:
         add("PASS", "10. Variables con nombre de comando", "ninguna")
+
+    # 11. Caracteres no ASCII fuera de cadenas y comentarios: FlexScript no compila un identificador
+    # con tildes (medido: «treenode tCámara = model();» no compila; «"Cámara"» en una cadena sí)
+    noascii = [i for i, ln in enumerate(blank.split("\n"), 1) if not ln.isascii()]
+    if noascii:
+        add("FAIL", "11. Caracteres no ASCII en el código", "líneas %s — FlexScript no compila identificadores "
+            "con tildes o ñ: quítalas del nombre de la variable (en cadenas sí valen)" % noascii[:12])
+    else:
+        add("PASS", "11. Caracteres no ASCII en el código", "ninguno fuera de cadenas y comentarios")
 
     # Extra: location como string
     locstr = [line_of(code, m.start()) for m in re.finditer(r"\.location\s*=\s*\"", code)]

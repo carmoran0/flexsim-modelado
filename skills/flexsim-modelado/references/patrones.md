@@ -132,25 +132,28 @@ if (objectexists(c1) && objectexists(s1) && objectexists(d1)) {
 ## 5. Conectar de forma repetible
 
 En un bloque aparte ya no sirve la marca de «objeto recién creado». Marca cada par con una
-etiqueta en **los dos extremos** y conecta solo si falta alguna:
+etiqueta en **los dos extremos**, con dirección (`cxo` en el origen, `cxi` en el destino), y conecta
+solo si falta alguna:
 
 ```flexscript
 treenode ka = model().find("Torno");
 treenode kb = model().find("Cinta1");
 if (objectexists(ka) && objectexists(kb)) {
-    if (ka.labels.assert("cxA_Cinta1", 0).value == 0 || kb.labels.assert("cxA_Torno", 0).value == 0) {
+    if (ka.labels.assert("cxoA_Cinta1", 0).value == 0 || kb.labels.assert("cxiA_Torno", 0).value == 0) {
         contextdragconnection(ka, kb, "A");
-        ka.labels.assert("cxA_Cinta1", 0).value = 1;
-        kb.labels.assert("cxA_Torno", 0).value = 1;
+        ka.labels.assert("cxoA_Cinta1", 0).value = 1;
+        kb.labels.assert("cxiA_Torno", 0).value = 1;
     }
 }
 ```
 
 - Repetir el bloque no duplica nada. Un objeto recreado pierde sus marcas y se reconecta.
+- Sin dirección en la marca (`cxA_<otro>` en los dos extremos, versiones anteriores) la conexión
+  de vuelta B → A ve las marcas de A → B y no se hace (medido).
 - No compruebes la conexión por los puertos: con cintas, `outObjects` contiene la
   transferencia y no el objeto.
-- Un modelo construido sin marcas (versión anterior del script) duplicaría las conexiones:
-  empieza un modelo vacío.
+- Un modelo construido sin marcas o con las marcas antiguas sin dirección duplicaría las
+  conexiones: empieza un modelo vacío.
 - Ramificar = una conexión por par. El **número de puerto** es el orden en que se hicieron las
   conexiones `"A"` desde ese objeto.
 

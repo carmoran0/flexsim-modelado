@@ -24,7 +24,13 @@ Tools/Exec (executestring(param(1))) y Tools/RunFS (executefsfile(param(1), 1)).
 ejecuta con un marcador final 'return "OK";':
     "OK"  -> el bloque terminó;  None -> excepción en ejecución;  0.0 -> no compila.
 FlexScript no tiene try/catch: si un bloque falla, se busca la primera sentencia que falla
-ejecutando prefijos del bloque (--localizar).
+ejecutando prefijos del bloque (--localizar). Cada prefijo se EJECUTA: solo vale para bloques
+repetibles (los del generador lo son); uno que crea objetos sin comprobar los crearía de más.
+
+Resultado: la última línea dice «Resultado: OK» o cuántos fallos hay, y --json guarda el detalle
+con el total en "fallos" (bloques, Code que no compilan, propiedades inexistentes, alarmas del
+vigilante, cruces de recorridos). NO uses el código de salida: al cerrar FlexSim el proceso
+termina con un segmentation fault (139 en bash) aunque todo haya ido bien (medido en 6 de 6).
 """
 import argparse
 import io
@@ -35,6 +41,9 @@ import re
 import sys
 import tempfile
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from check_script import partir_bloques  # noqa: E402
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
@@ -82,10 +91,14 @@ class Sesion:
         t = time.time()
         self.c = FlexSimPy.launch(showGUI=False, programDir=programa)
         self.t_launch = time.time() - t
-        fd, self.boot = tempfile.mkstemp(suffix=".fsx")
+        fd, boot = tempfile.mkstemp(suffix=".fsx")
         os.close(fd)
-        io.open(self.boot, "w", encoding="utf-8").write(BOOT)
-        self.c.open(self.boot.replace("\\", "/"))
+        io.open(boot, "w", encoding="utf-8").write(BOOT)
+        self.c.open(boot.replace("\\", "/"))
+        try:
+            os.remove(boot)     # ya está cargado
+        except OSError:
+            pass
         self.ruta_exec = "Tools/Exec"
         if self.x("return 1;") != 1.0:
             raise RuntimeError("No se pudo ejecutar FlexScript a traves del modelo base")
@@ -101,10 +114,20 @@ class Sesion:
             raise RuntimeError("No se pudo ejecutar FlexScript tras abrir el modelo base")
 
     def x(self, codigo):
+        # FlexSimPy pasa un texto cuyos caracteres caben en Latin-1 (á, ñ...) como bytes Latin-1, no
+        # UTF-8 (PyConverter::convertToVariant): FlexSim guarda bytes inválidos y devolverlos rompe
+        # evaluate (SystemError). Un carácter fuera de Latin-1 en un comentario fuerza la vía UTF-8.
+        if not codigo.isascii():
+            codigo += "\n// —"
         return self.c.evaluate(self.ruta_exec, codigo)
 
     def bloque(self, texto):
         return self.x(texto + '\nreturn "OK";')
+
+    def compila(self, codigo):
+        """Compila sin ejecutar (if (0) { ... }). Un campo Code o un trigger que no compila no da
+        error al fijarlo ni al simular: el objeto simplemente no hace nada."""
+        return self.x("if (0) {\n" + codigo + '\n}\nreturn "COMPILA";') == "COMPILA"
 
     def sembrar(self, semilla):
         """Siembra los streams 0-99 con valores derivados de `semilla` (randinit). Llamar DESPUÉS de
@@ -134,7 +157,6 @@ class Sesion:
     def localizar(self, texto):
         """Devuelve la primera línea cuyo prefijo deja de terminar en OK (aprox.)."""
         lineas = texto.split("\n")
-        ok_hasta = 0
         for i in range(1, len(lineas) + 1):
             pref = "\n".join(lineas[:i])
             if pref.count("{") != pref.count("}") or pref.count("(") != pref.count(")"):
@@ -142,16 +164,15 @@ class Sesion:
             r = self.x(pref + '\nreturn "OK";')
             if r != "OK":
                 return i, lineas[i - 1].strip(), ESTADO.get(r, repr(r))
-            ok_hasta = i
         return None
 
 
 def bloques_de(texto):
+    """[(número, título, texto)] de cada bloque, con la misma cabecera que acepta check_script.py."""
     out = []
-    for p in re.split(r"(?=/\* BLOQUE \d+)", texto):
-        m = re.match(r"/\* BLOQUE (\d+) - (.*?)\s*\*/", p, re.S)
-        if m:
-            out.append((int(m.group(1)), m.group(2).strip().split("\n")[0], p))
+    for num, p in partir_bloques(texto):
+        m = re.match(r"/\*\s*BLOQUE\s*\d+\s*[-–—:]?\s*(.*?)\s*\*/", p, re.I | re.S)
+        out.append((num, m.group(1).strip().split("\n")[0] if m else "", p))
     return out
 
 
@@ -250,13 +271,13 @@ def _foto(s):
     return out
 
 
-def vigilar_simulacion(s, hasta, paso=3600, parada=None, ciclo=86400, seguir=False, excluir=("Rack",)):
+def vigilar_simulacion(s, hasta, paso=3600, parada=None, ciclo=86400, excluir=("Rack",)):
     """Simula hasta `hasta` a trozos de `paso` s y vigila tres fallos que la simulación no avisa:
 
     - SIN PROGRESO (interbloqueo global): durante `parada` s (por defecto 4 trozos) ningún objeto
       saca nada y hay items dentro. Sospechosos: objetos con contenido sin salidas y recursos
       móviles en el mismo estado no ocioso todo el tiempo (p. ej. operarios en «utilize» sin
-      soltar). Para la simulación salvo `seguir`.
+      soltar). Para la simulación.
     - ATASCO (local): un objeto sigue recibiendo pero no saca nada en `parada` s. El resto del
       modelo puede seguir moviéndose. Un Combiner esperando stock o una cartera que espera a
       propósito también salen aquí: revisar, no siempre es un error.
@@ -296,8 +317,7 @@ def vigilar_simulacion(s, hasta, paso=3600, parada=None, ciclo=86400, seguir=Fal
                 alarmas.append({"tipo": "SIN PROGRESO", "t": fotos[-1][0],
                                 "detalle": "%.1f h sin ninguna salida con %d items dentro" % (parada / 3600.0, wip),
                                 "sospechosos": sosp})
-                if not seguir:
-                    break
+                break
             # --- atascos locales
             for n, o in f.items():
                 if ("A", n) in avisados or o["clase"] in no_vig:
@@ -460,11 +480,12 @@ def main(argv):
     ap.add_argument("--saltar", action="append", default=[], help="regex sobre el título de bloques a saltar")
     ap.add_argument("--correr", type=float, default=0, help="segundos de simulación tras construir (0 = no)")
     ap.add_argument("--fspy", default=os.environ.get("FLEXSIMPY_DIR", ""))
-    ap.add_argument("--programa", default=r"C:\Program Files\Autodesk\FlexSim 2027\program")
+    ap.add_argument("--programa", default=os.environ.get("FLEXSIM_PROGRAM", r"C:\Program Files\Autodesk\FlexSim 2027\program"))
     ap.add_argument("--base", default=os.environ.get("FLEXSIM_BASE_MODEL", ""),
                     help="modelo .fsm real que se vacía y se usa de base (necesario para simular)")
     ap.add_argument("--json")
-    ap.add_argument("--localizar", action="store_true", help="si un bloque falla, buscar la línea")
+    ap.add_argument("--localizar", action="store_true",
+                    help="si un bloque falla, buscar la línea (re-ejecuta el bloque: solo bloques repetibles)")
     ap.add_argument("--consulta", action="append", default=[], help="FlexScript extra a evaluar al final")
     ap.add_argument("--guardar", help="ruta .fsm donde guardar el modelo construido (savebyname, sin dialogo)")
     ap.add_argument("--posiciones", help="JSON <prefijo>_posiciones.json de generar_escena.py para comparar")
@@ -492,7 +513,11 @@ def main(argv):
     print("FlexSim arrancado en %.1f s" % s.t_launch)
     rep["unidades"] = s.x(Q_UNIDADES)
     print("Unidades del modelo base:", rep["unidades"])
-    for num, titulo, cuerpo in bloques_de(texto):
+    bloques = bloques_de(texto)
+    if not bloques:
+        print("FALLO: no hay cabeceras '/* BLOQUE N - título */': no se ha ejecutado nada")
+        rep["fallos"] += 1
+    for num, titulo, cuerpo in bloques:
         if any(re.search(p, titulo, re.I) for p in a.saltar):
             print("B%-3d SALTADO     %s" % (num, titulo[:80]))
             rep["bloques"].append({"n": num, "titulo": titulo, "estado": "SALTADO"})
@@ -508,8 +533,7 @@ def main(argv):
                 info["linea"] = s.localizar(cuerpo)
                 print("     primera linea que falla:", info["linea"])
         rep["bloques"].append(info)
-    # Cada campo Code / trigger por separado: un código que no compila NO da error al fijarlo ni al
-    # simular (el campo simplemente no hace nada). Se compila sin ejecutarlo: if (0) { ... }
+    # Cada campo Code / trigger por separado (ver Sesion.compila)
     nombres_obj = dict(re.findall(r'treenode\s+(\w+)\s*=\s*model\(\)\.find\("([^"]+)"\)', texto))
     no_compilan = []
     vistos = set()
@@ -517,11 +541,11 @@ def main(argv):
         if cod in vistos:
             continue
         vistos.add(cod)
-        r = s.x("if (0) {\n" + cod + '\n}\nreturn "COMPILA";')
-        if r != "COMPILA":
+        if not s.compila(cod):
             var = desc.split(".")[0]
             no_compilan.append("%s [%s]: %s" % (desc, nombres_obj.get(var, "?"), cod[:90]))
     rep["codigos_que_no_compilan"] = no_compilan
+    rep["fallos"] += len(no_compilan)
     print("Campos Code y triggers que NO compilan: %s" % (len(no_compilan) if no_compilan else "ninguno"))
     for n in no_compilan:
         print("   ", n)
@@ -535,6 +559,7 @@ def main(argv):
         if v is None:
             malas.append("%s.%s" % (obj, p))
     rep["propiedades_sin_valor"] = malas
+    rep["fallos"] += len(malas)
     print("Propiedades fijadas que getProperty no devuelve (nombre inválido o no aplica): %s"
           % (", ".join(malas) if malas else "ninguna"))
     if a.posiciones:
@@ -603,7 +628,8 @@ def main(argv):
         print("Consulta:", q[:70], "->", r)
     if a.json:
         io.open(a.json, "w", encoding="utf-8").write(json.dumps(rep, ensure_ascii=False, indent=1, default=str))
-    return 1 if rep["fallos"] or no_compilan else 0
+    print("Resultado: %s" % ("OK" if not rep["fallos"] else "%d fallos (detalle arriba)" % rep["fallos"]))
+    return 1 if rep["fallos"] else 0   # se pierde al cerrar FlexSim: el contrato es --json / la línea anterior
 
 
 if __name__ == "__main__":

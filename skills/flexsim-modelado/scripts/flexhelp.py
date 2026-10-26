@@ -34,6 +34,9 @@ def main(argv):
     path = os.environ.get("FLEXSIM_HELP_XML", DEFAULT)
     if "--xml" in argv:
         i = argv.index("--xml")
+        if i + 1 >= len(argv):
+            print("Falta la ruta de --xml")
+            return 2
         path = argv[i + 1]
         argv = argv[:i] + argv[i + 2:]
     if not argv:
@@ -41,7 +44,7 @@ def main(argv):
         return 0
     if not os.path.isfile(path):
         print("NO HAY AYUDA: no existe %s" % path)
-        print("Marca como SIN VERIFICAR toda API que no esté en la tabla de SKILL.md,")
+        print("Marca como SIN VERIFICAR toda API que no esté en references/api.md,")
         print("o pide al usuario que ejecute este script en su máquina y pegue el resultado.")
         return 2
 

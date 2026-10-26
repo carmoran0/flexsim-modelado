@@ -6,12 +6,15 @@ Escena (generar_escena.py):
   Línea con operarios:  Source_Llegadas -> Queue_Entrada -> Puesto_1..2 (equipo de 2 operarios) -> Sink_Salida
   Stock con FEFO:       Source_Lotes -> Separator_Lote (lote -> n_unidades) -> Rack_Stock
                         Source_Pedidos -> Queue_Pedidos -> Combiner_Estacion (tira del rack, FEFO) -> Sink_Salida
+  Fuera del flujo:      Cámara_A <-> Cámara_B (nombres con tilde, conexión en los dos sentidos)
 
 Comprueba:
-  1. Sin FlexSim: check_script.py da 0 FAIL sobre el script generado.
+  1. Sin FlexSim: check_script.py da 0 FAIL sobre el script generado, y casos fijos de fallos que
+     ya se colaron (linter, cabeceras de bloque, nombres repetidos en el generador).
   2. Con FlexSim (variante «sana», 8 h): todos los bloques OK y todos los campos Code compilan;
      el Sink recibe lo que llega (salvo el WIP); utilización de operarios en el rango teórico;
      el Separator divide cada lote en n_unidades; el rack entrega en orden FEFO (0 infracciones);
+     Cámara_A y Cámara_B se conectan en los dos sentidos;
      el vigilante no da alarmas; misma semilla = mismo resultado, otra semilla = distinto.
   3. Variante «rota» (un Processor de capacidad 2 con operarios, el fallo medido): el vigilante
      debe dar SIN PROGRESO. Si no la da, el vigilante o el patrón han cambiado.
@@ -112,6 +115,13 @@ def escena(variante="sana"):
     e.codigo("Source_Pedidos", "SendToPort", HDR + ['item.labels.assert("n_pedido", 0).value = duniform(1, 3, 7);', "return 1;"], bloque=L)
     e.estacion_fefo("Combiner_Estacion", ["n_pedido"], bloque=L)
     e.codigo("Combiner_Estacion", "ProcessTime", ["return 20;"], bloque=L)
+    # Dos fallos del generador que se colaron: nombres con tilde (el bloque no compilaba) y la
+    # conexión de vuelta B -> A (se saltaba). Dos colas fuera del flujo, sin items.
+    for n, x in [("Cámara_A", 0), ("Cámara_B", 4)]:
+        e.crear("Queue", n, bloque="Stock")
+        e.colocar_centro(n, x, -40)
+    e.conectar("Cámara_A", "Cámara_B")
+    e.conectar("Cámara_B", "Cámara_A")
     return e
 
 
@@ -132,9 +142,9 @@ return [src.stats.output.value, sk.stats.input.value, 1 - idle / n / T, lot.labe
 def correr_variante(variante, fspy, base, programa, semillas):
     """Se ejecuta en un subproceso: construye, compila los Code, simula con cada semilla."""
     from flexsim_check import Sesion, bloques_de, codigos_de
-    d = tempfile.mkdtemp(prefix="humo_")
-    escena(variante).escribir(d, "humo")
-    texto = io.open(os.path.join(d, "humo.flexscript"), encoding="utf-8").read()
+    with tempfile.TemporaryDirectory(prefix="humo_") as d:
+        escena(variante).escribir(d, "humo")
+        texto = io.open(os.path.join(d, "humo.flexscript"), encoding="utf-8").read()
     s = Sesion(fspy, programa, base)
     res = {"variante": variante, "bloques_mal": [], "no_compilan": [], "corridas": []}
     for num, titulo, cuerpo in bloques_de(texto):
@@ -142,8 +152,11 @@ def correr_variante(variante, fspy, base, programa, semillas):
         if r != "OK":
             res["bloques_mal"].append("B%d %s: %r" % (num, titulo, r))
     for desc, cod in codigos_de(texto):
-        if s.x("if (0) {\n" + cod + '\n}\nreturn "COMPILA";') != "COMPILA":
+        if not s.compila(cod):
             res["no_compilan"].append(desc)
+    if variante == "sana":
+        res["ida_vuelta"] = s.x('Object a = model().find("Cámara_A"); Object b = model().find("Cámara_B"); '
+                                'return [a.outObjects.length, b.outObjects.length];')
     for sem in semillas:
         vig = s.correr(HORAS * 3600, semilla=sem, vigilar=1800, parada=3 * 3600 if variante == "rota" else None)
         k = s.x(Q_KPI) if variante == "sana" else None
@@ -164,10 +177,12 @@ def comprobar_sana(r):
     ok.append(("Sink recibe línea + pedidos (salvo WIP)", llegadas + pedidos_servidos - cola - PUESTOS <= sink <= llegadas + pedidos_servidos,
                (sink, llegadas, pedidos_servidos, cola)))
     rho = esperadas * SERVICIO_MEDIO / (HORAS * 3600) / PUESTOS
-    ok.append(("utilización operarios en [ρ, ρ+0,15] (ρ=%.2f)" % rho, rho - 0.05 <= util <= rho + 0.15, round(util, 3)))
+    ok.append(("utilización operarios en [ρ-0,05, ρ+0,15] (ρ=%.2f)" % rho, rho - 0.05 <= util <= rho + 0.15, round(util, 3)))
     ok.append(("Separator: salidas = suma de n_unidades (±1 lote en proceso)", 0 <= unid - sep_out <= 8, (unid, sep_out)))
     ok.append(("FEFO: 0 infracciones en %d salidas del rack" % rk_sal, fefo_mal == 0 and rk_sal > 0, fefo_mal))
     ok.append(("estación sirve los pedidos (salvo los últimos)", pedidos_servidos >= 0.8 * n_ped - 2, (pedidos_servidos, n_ped)))
+    ok.append(("nombres con tilde y conexión en los dos sentidos (1 salida cada cola)",
+               r["ida_vuelta"] == [1.0, 1.0], r["ida_vuelta"]))
     ok.append(("vigilante sin alarmas", not c1["alarmas"], [a["detalle"] for a in c1["alarmas"]]))
     ok.append(("misma semilla = mismo resultado", c1["kpi"] == c1b["kpi"], (c1["kpi"], c1b["kpi"])))
     ok.append(("otra semilla = resultado distinto", c1["kpi"] != c2["kpi"], (c1["kpi"][:2], c2["kpi"][:2])))
@@ -179,6 +194,40 @@ def comprobar_rota(r):
     tipos = [a["tipo"] for a in c["alarmas"]]
     return [("variante rota: el vigilante detecta SIN PROGRESO", "SIN PROGRESO" in tipos,
              [a["detalle"] + " | " + "; ".join(a["sospechosos"][:4]) for a in c["alarmas"]] or c["kpi"])]
+
+
+# Casos fijos del linter (sin FlexSim): (descripción, script, comprobación que debe dar FAIL o None
+# si no debe dar ninguno). Cada uno es un fallo que ya se coló.
+CASOS_LINTER = [
+    ("un comentario que menciona «int ne» no es un fallo",
+     '/* Ctrl+S */\n/* BLOQUE 1 - A */\n// no declares "int ne = 1;"\nreturn 1;\n', None),
+    ("variable con nombre de comando", '/* Ctrl+S */\n/* BLOQUE 1 - A */\nint ne = 1;\n', "10."),
+    ("variable con tilde", '/* Ctrl+S */\n/* BLOQUE 1 - A */\ntreenode cámara = model();\n', "11."),
+]
+
+
+def comprobar_estatica(d):
+    from flexsim_check import bloques_de
+    ok = []
+    for i, (desc, script, falla) in enumerate(CASOS_LINTER):
+        ruta = os.path.join(d, "caso%d.flexscript" % i)
+        io.open(ruta, "w", encoding="utf-8").write(script)
+        p = subprocess.run([sys.executable, os.path.join(AQUI, "check_script.py"), ruta],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        fails = [ln for ln in p.stdout.splitlines() if ln.startswith("[FAIL]")]
+        bien = not fails if falla is None else any(f.startswith("[FAIL] " + falla) for f in fails)
+        ok.append(("linter: " + desc, bien, fails))
+    b = [(n, t) for n, t, _ in bloques_de("/* BLOQUE 1 — Crear */\nreturn 1;\n/*  bloque 2: Conectar */\nreturn 1;\n")]
+    ok.append(("flexsim_check lee cabeceras con raya, minúsculas y espacios de más", b == [(1, "Crear"), (2, "Conectar")], b))
+    e = Escena("nombres")
+    e.crear("Processor", "Torno")
+    try:
+        e.muro("Torno", 0, 0, 10, 0)
+        rechaza = False
+    except ValueError:
+        rechaza = True
+    ok.append(("generador: rechaza una pared con el nombre de un objeto", rechaza, None))
+    return ok
 
 
 def main(argv):
@@ -201,16 +250,20 @@ def main(argv):
         return 0
     fallos = 0
     # 1. estática
-    d = a.guardar_escena or tempfile.mkdtemp(prefix="humo_")
-    os.makedirs(d, exist_ok=True)
-    escena("sana").escribir(d, "humo")
-    p = subprocess.run([sys.executable, os.path.join(AQUI, "check_script.py"), os.path.join(d, "humo.flexscript")],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
-    nfail = sum(1 for ln in p.stdout.splitlines() if ln.lstrip().startswith("[FAIL]"))
-    print("%-4s check_script.py: %d FAIL" % ("OK" if nfail == 0 else "MAL", nfail))
-    if nfail:
-        print(p.stdout[-2000:])
-        fallos += 1
+    with tempfile.TemporaryDirectory(prefix="humo_") as tmp:
+        d = a.guardar_escena or tmp
+        os.makedirs(d, exist_ok=True)
+        escena("sana").escribir(d, "humo")
+        p = subprocess.run([sys.executable, os.path.join(AQUI, "check_script.py"), os.path.join(d, "humo.flexscript")],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        nfail = sum(1 for ln in p.stdout.splitlines() if ln.lstrip().startswith("[FAIL]"))
+        print("%-4s check_script.py: %d FAIL" % ("OK" if nfail == 0 else "MAL", nfail))
+        if nfail:
+            print(p.stdout[-2000:])
+            fallos += 1
+        for nombre, bien, dato in comprobar_estatica(tmp):
+            print("%-4s %s  [%s]" % ("OK" if bien else "MAL", nombre, dato))
+            fallos += 0 if bien else 1
     if a.solo_estatica:
         return 1 if fallos else 0
     if not a.fspy or not os.path.exists(os.path.join(a.fspy, "FlexSimPy.pyd")):
@@ -227,11 +280,15 @@ def main(argv):
                "--fspy", a.fspy, "--base", a.base, "--programa", a.programa]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900)
         try:
-            r = json.load(io.open(tmp, encoding="utf-8"))
+            with io.open(tmp, encoding="utf-8") as f:
+                r = json.load(f)
         except (OSError, ValueError):
             print("MAL  variante %s: el subproceso no escribió resultados" % variante)
             fallos += 1
             continue
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
         for nombre, bien, dato in comprobar(r):
             print("%-4s %s  [%s]" % ("OK" if bien else "MAL", nombre, dato))
             fallos += 0 if bien else 1

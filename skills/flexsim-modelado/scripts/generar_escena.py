@@ -8,7 +8,8 @@ errores conocidos (ver references/patrones.md):
     PLANO (suelos, paredes) -> CONECTAR -> A* (navegador, muros lógicos, miembros) -> PROPIEDADES
 
 Todos los bloques son repetibles: crear solo crea lo que falta, colocar y fijar propiedades es
-idempotente y conectar usa marcas cx<tecla>_<otro> en las etiquetas de los dos extremos.
+idempotente y conectar usa marcas cxo<tecla>_<destino> / cxi<tecla>_<origen> en las etiquetas de
+los dos extremos (con dirección: A -> B y B -> A son conexiones distintas).
 
 La misma descripción sirve para dibujar el plano 2D (SVG con rótulos, PNG de fondo para el
 Model Background de FlexSim) con tamaños nominales: `previsualizar`, `svg_plano`, `png_fondo`.
@@ -53,16 +54,17 @@ Clases de los objetos visuales y de A* (ver references/api.md):
 import io
 import math
 import os
-import re
 import zlib
 import struct
 
 CONV_PREFIX = "Conveyor::"
-TE_CLASSES = ("Operator", "Transporter", "TaskExecuter", "Robot", "Crane", "ASRSvehicle", "Elevator")
 
 
 def _id(name):
-    return re.sub(r"\W", "", name)
+    """Parte de nombre de variable FlexScript sacada del nombre de un objeto. Solo ASCII: FlexScript
+    no compila identificadores con tildes (medido: «treenode tCámara» no compila). El resto de
+    caracteres se codifica (_<hex>_), así «Zona-A» y «ZonaA» no dan la misma variable."""
+    return "".join(c if c.isascii() and (c.isalnum() or c == "_") else "_%x_" % ord(c) for c in name)
 
 
 def code_string(lines):
@@ -90,15 +92,24 @@ class Escena:
         self.dividers = []      # (bloque, nombre, puntos)
         self.astar_members = []
         self.astar_barreras = []
-        self.dibujo = []        # solo plano: ("puerta"|"muelle"|"texto"|"cota", datos)
+        self.dibujo = []        # solo plano: ("puerta"|"muelle"|"texto", datos)
         self.nominal = {}       # nombre -> (sx, sy) para previsualizar
         self.zcinta = 0
         self._k = 0
+        self._vars = {}         # _id(nombre) -> nombre: objetos, suelos, paredes y muros A*
+
+    def _nuevo(self, nombre):
+        """Registra un nombre. Rechaza repetidos y nombres que darían la misma variable FlexScript:
+        el bloque no compilaría (una variable declarada dos veces no compila, medido)."""
+        v = _id(nombre)
+        if v in self._vars:
+            raise ValueError("nombre duplicado: %s" % nombre if self._vars[v] == nombre else
+                             "%s y %s dan la misma variable FlexScript" % (self._vars[v], nombre))
+        self._vars[v] = nombre
 
     # ------------------------------------------------------------- crear
     def crear(self, clase, nombre, bloque="Objetos"):
-        if any(n == nombre for (_, _, n) in self.objs) or any(v[2] == nombre for v in self.visual):
-            raise ValueError("nombre duplicado: %s" % nombre)
+        self._nuevo(nombre)
         self.objs.append((bloque, clase, nombre))
 
     def clase_de(self, nombre):
@@ -146,20 +157,6 @@ class Escena:
     def flexscript_colocacion(self, lineas):
         self.ops.append(("raw", list(lineas)))
 
-    # compatibilidad con la API anterior
-    def colocar_abs(self, nombre, x, y, fx=0.5):
-        if fx == 0.5:
-            self.colocar_centro(nombre, x, y)
-        else:
-            self.colocar_borde(nombre, x, y, "izq" if fx == 0 else "der")
-
-    def colocar_junto(self, nombre, ref, hueco=0.5, y=None, lado="derecha"):
-        self.encadenar(nombre, ref, hueco, "+x" if lado == "derecha" else "-x", y)
-
-    def cinta(self, nombre, origen, destino, hueco_inicio=0, desplaz_y=None):
-        self.cinta_auto(nombre, origen, destino, hueco_inicio, eje="x",
-                        desplaz=0 if desplaz_y is None else ("frac", desplaz_y))
-
     # ------------------------------------------------------------- plano: suelos, paredes, A*
     def zona(self, nombre, rects, color, bloque="Plano: suelos", etiqueta=None, mostrar_nombre=True,
              etiqueta_en=None):
@@ -167,6 +164,7 @@ class Escena:
         etiqueta_en=(x, y): dónde rotular la zona en el plano (por defecto, arriba del mayor)."""
         for i, r in enumerate(rects, 1):
             n = nombre if len(rects) == 1 else "%s_%d" % (nombre, i)
+            self._nuevo(n)
             self.visual.append((bloque, "plane", n, {"rect": r, "color": color, "show": mostrar_nombre,
                                                        "etiqueta": etiqueta or nombre, "grupo": nombre,
                                                        "etiqueta_en": etiqueta_en}))
@@ -176,12 +174,14 @@ class Escena:
         """Pared recta alineada con los ejes: VisualTool Cube y, si astar, un AStar::Divider."""
         if x1 != x2 and y1 != y2:
             raise ValueError("muro %s: solo paredes alineadas con x o con y" % nombre)
+        self._nuevo(nombre)
         self.visual.append((bloque, "cube", nombre, {"seg": (x1, y1, x2, y2), "tipo": tipo, "grosor": grosor,
                                                       "altura": altura, "color": color}))
         if astar:
-            self.dividers.append((bloque + " (A*)", "AS_" + nombre, [(x1, y1), (x2, y2)]))
+            self.divider("AS_" + nombre, [(x1, y1), (x2, y2)], bloque + " (A*)")
 
     def divider(self, nombre, puntos, bloque="A*: muros"):
+        self._nuevo(nombre)
         self.dividers.append((bloque, nombre, list(puntos)))
 
     def miembros_astar(self, nombres):
@@ -432,9 +432,6 @@ class Escena:
 
     def _cinta_puntos(self, a, b, hi, hf, dz, dzf, eje):
         e = self._eje(a, b, eje)
-        if isinstance(dz, tuple):            # compatibilidad: fracción de medio tamaño y
-            dz = dz[1] * a[3] / 2
-            dzf = 0
         if e == "x":
             sg = 1 if b[0] >= a[0] else -1
             return ((a[0] + sg * (a[2] / 2 + hi), a[1] + dz), (b[0] - sg * (b[2] / 2 + hf), b[1] + dzf))
@@ -515,10 +512,7 @@ class Escena:
                 ns = "-" if sgn > 0 else "+"
                 cv, a, b, ca, sa, cb, sb = (self._v("k"), self._v("a"), self._v("b"), self._v("p"),
                                              self._v("q"), self._v("u"), self._v("w"))
-                if isinstance(dz, tuple):
-                    dzs, dzfs = "%s * %s.y / 2" % (_num(dz[1]), sa), "0"
-                else:
-                    dzs, dzfs = _num(dz), _num(dzf)
+                dzs, dzfs = _num(dz), _num(dzf)
                 if e == "x":
                     st = "[%s.x %s (%s.x / 2 + %s), %s.y + %s, zCinta]" % (ca, sg, sa, _num(hi), ca, dzs)
                     en = "[%s.x %s (%s.x / 2 + %s), %s.y + %s, zCinta]" % (cb, ns, sb, _num(hf), cb, dzfs)
@@ -581,7 +575,7 @@ class Escena:
         L = []
         for i, (a, b, k) in enumerate(conns, 1):
             va, vb = "%s%da%s" % (tag, i, _id(a)), "%s%db%s" % (tag, i, _id(b))
-            ma, mb = "cx%s_%s" % (k, b), "cx%s_%s" % (k, a)
+            ma, mb = "cxo%s_%s" % (k, b), "cxi%s_%s" % (k, a)   # con dirección: B -> A es otra conexión
             L += ['treenode %s = model().find("%s");' % (va, a),
                   'treenode %s = model().find("%s");' % (vb, b),
                   "if (objectexists(%s) && objectexists(%s)) {" % (va, vb),
@@ -745,13 +739,13 @@ class Escena:
         for b, names in grupos:
             C.append("\n/* Limpieza: %s */" % b)
             for n in names:
-                v = "lim" + _id(b) + _id(n)
+                v = "lim_" + _id(n)        # el nombre ya es único (_nuevo); «lim_» no choca con «limCinta»
                 C += ['treenode %s = model().find("%s");' % (v, n), "if (objectexists(%s)) { %s.destroy(); }" % (v, v)]
         convs = [n for (_, c, n) in self.objs if c.startswith(CONV_PREFIX)]
         if convs:
             C.append("\n/* Limpieza: solo cintas (si una transferencia quedo mal) */")
             for n in convs:
-                v = "limCintas" + _id(n)
+                v = "limCinta_" + _id(n)
                 C += ['treenode %s = model().find("%s");' % (v, n), "if (objectexists(%s)) { %s.destroy(); }" % (v, v)]
         if self.dividers:
             C.append("\n/* Limpieza: navegador A* y todos sus muros logicos */")
@@ -838,7 +832,7 @@ class Escena:
             if c.startswith(CONV_PREFIX):
                 continue
             base = c.split("::")[-1]
-            if base in TE_CLASSES[:3] or base == "Dispatcher":
+            if base in ("Operator", "Transporter", "TaskExecuter", "Dispatcher"):
                 if not mostrar_recursos:
                     continue
                 col = self.COLOR_CLASE.get(base, "#999")
