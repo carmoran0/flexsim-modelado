@@ -241,3 +241,36 @@ guardar para dejar el modelo en su estado inicial. (`cmdsaveas` y `savetree` sí
   reproducibilidad por semilla y que el vigilante detecta la variante rota. La parte estática
   (sin FlexSim, salida 2) pasa además casos fijos del linter, de las cabeceras de bloque y de los
   nombres repetidos del generador. Tarda ~30 s. Pásala tras tocar los scripts del skill.
+
+## 10. Muchas réplicas: una sesión para todas, no un proceso por réplica
+
+Medido el 12/11/2026 con FlexSim 2027 (licencia de Autodesk), al lanzar 160 réplicas:
+
+- **Cada arranque de FlexSim pasa por la licencia.** `FlexSimPy.launch()` lanza procesos
+  `AdskLicensingAgent` que tardan en cerrarse. Con pocos arranques, `launch` tarda unos 5 s; tras
+  unas 60 ejecuciones en 20 min (3 procesos a la vez) pasó a 25-170 s, con la CPU casi parada.
+  Síntoma: procesos `python` vivos durante minutos con 3-7 s de CPU y una docena de
+  `AdskLicensingAgent` en el administrador de tareas. A las horas, con los agentes cerrados,
+  vuelve a ser rápido.
+- **Arreglo: un arranque por trabajador.** Una `Sesion` sirve para muchas réplicas y para varios
+  escenarios:
+  - misma escena, otra semilla: `s.c.reset()` + `s.sembrar(n)` + `s.c.runToTime(T)`
+    (`Sesion.correr(T, semilla=n)`);
+  - otro escenario: `s.c.open(base)` + `s.x(VACIAR_MODELO)` y volver a ejecutar los bloques. El
+    nodo `../ClaudeExec` vive fuera del modelo y sobrevive.
+  Comprobado: 4 réplicas (2 escenarios × 2 semillas) en una sola sesión dan **exactamente** los
+  mismos KPIs que las mismas réplicas en procesos separados. Requisito: que todos los contadores
+  vuelvan a 0 en el Reset (triggers `OnReset`) y `setresetposition` (el generador lo hace).
+- **Varios trabajadores a la vez funcionan** (3-4 procesos, cada uno con su sesión). Lo que falló
+  una vez fue arrancar `flexsim_check.py` mientras otros tres simulaban (*segmentation fault* al
+  arrancar): se relanza y listo.
+- **El proceso suele morir al cerrar** (*segmentation fault* después de imprimir el resultado).
+  Escribe el JSON antes y termina con `os._exit(0)`. Cada caída deja un volcado de unos 45 MB en
+  `%LOCALAPPDATA%\CrashDumps` (Windows guarda los 10 últimos).
+- **FlexSimPy cambia el directorio de trabajo** al del modelo base al abrirlo. Una ruta relativa
+  en `--guardar` o `--json` acaba en esa carpeta (el `.fsm` apareció junto a
+  `PostOfficeModel.fsm`). Convierte las rutas con `os.path.abspath` **antes** de crear la sesión.
+- **Perfil horario.** `runToTime` admite cortes sucesivos sin reset: leyendo cada hora el tiempo
+  ocioso acumulado de cada recurso (`stats.state().getTotalTimeAt(STATE_IDLE)`) se obtiene la
+  utilización por hora del día, que es lo que hace falta para dimensionar turnos
+  (`perfil_horario_v9.py` en el proyecto de ejemplo).

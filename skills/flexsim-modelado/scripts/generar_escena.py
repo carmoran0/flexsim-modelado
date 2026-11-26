@@ -95,6 +95,9 @@ class Escena:
         self.dibujo = []        # solo plano: ("puerta"|"muelle"|"texto", datos)
         self.nominal = {}       # nombre -> (sx, sy) para previsualizar
         self.zcinta = 0
+        # True: cada extremo de cinta_auto a la altura de la cara superior del objeto que une
+        # (z de la base + tamaño z), en vez de zCinta. Así la cinta llega a la entrada de la máquina.
+        self.cinta_a_objetos = False
         self._k = 0
         self._vars = {}         # _id(nombre) -> nombre: objetos, suelos, paredes y muros A*
 
@@ -149,10 +152,11 @@ class Escena:
         self.ops.append(("cinta", nombre, origen, destino, hueco_inicio, hueco_fin, desplaz,
                          desplaz if desplaz_fin is None else desplaz_fin, eje))
 
-    def cinta_abs(self, nombre, inicio, fin):
+    def cinta_abs(self, nombre, inicio, fin, z=None):
         """Cinta entre dos puntos fijos (x, y) del plano, p. ej. un colector al que cargan de lado
-        varias estaciones (la transferencia de entrada se crea al conectar, en el punto más cercano)."""
-        self.ops.append(("cinta_abs", nombre, tuple(inicio), tuple(fin)))
+        varias estaciones (la transferencia de entrada se crea al conectar, en el punto más cercano).
+        z: altura (número) o (z_inicio, z_fin); por defecto, zCinta."""
+        self.ops.append(("cinta_abs", nombre, tuple(inicio), tuple(fin), z))
 
     def flexscript_colocacion(self, lineas):
         self.ops.append(("raw", list(lineas)))
@@ -418,7 +422,7 @@ class Escena:
                 pos[n] = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2,
                           abs(end[0] - start[0]) or 1.0, abs(end[1] - start[1]) or 1.0)
             elif k == "cinta_abs":
-                _, n, start, end = op
+                _, n, start, end, _z = op
                 cintas[n] = (start, end)
                 pos[n] = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2,
                           abs(end[0] - start[0]) or 1.0, abs(end[1] - start[1]) or 1.0)
@@ -452,13 +456,15 @@ class Escena:
                 L += op[1]
                 continue
             if k == "cinta_abs":
-                _, n, (x1, y1), (x2, y2) = op
+                _, n, (x1, y1), (x2, y2), z = op
+                z1, z2 = ("zCinta", "zCinta") if z is None else (
+                    tuple(_num(v) for v in z) if isinstance(z, (tuple, list)) else (_num(z), _num(z)))
                 cv = self._v("k")
                 L += ['treenode %s = model().find("%s");' % (cv, n),
                       "if (objectexists(%s)) {" % cv,
                       "    %s.as(Object).location = Vec3(0, 0, 0);" % cv,
-                      '    %s.as(Object).setProperty("StartLocation", [%s, %s, zCinta]);' % (cv, _num(x1), _num(y1)),
-                      '    %s.as(Object).setProperty("EndLocation", [%s, %s, zCinta]);' % (cv, _num(x2), _num(y2)),
+                      '    %s.as(Object).setProperty("StartLocation", [%s, %s, %s]);' % (cv, _num(x1), _num(y1), z1),
+                      '    %s.as(Object).setProperty("EndLocation", [%s, %s, %s]);' % (cv, _num(x2), _num(y2), z2),
                       "}"]
                 continue
             if k == "centro":
@@ -513,12 +519,14 @@ class Escena:
                 cv, a, b, ca, sa, cb, sb = (self._v("k"), self._v("a"), self._v("b"), self._v("p"),
                                              self._v("q"), self._v("u"), self._v("w"))
                 dzs, dzfs = _num(dz), _num(dzf)
+                za, zb = (("%s.z + %s.z" % (ca, sa), "%s.z + %s.z" % (cb, sb)) if self.cinta_a_objetos
+                          else ("zCinta", "zCinta"))
                 if e == "x":
-                    st = "[%s.x %s (%s.x / 2 + %s), %s.y + %s, zCinta]" % (ca, sg, sa, _num(hi), ca, dzs)
-                    en = "[%s.x %s (%s.x / 2 + %s), %s.y + %s, zCinta]" % (cb, ns, sb, _num(hf), cb, dzfs)
+                    st = "[%s.x %s (%s.x / 2 + %s), %s.y + %s, %s]" % (ca, sg, sa, _num(hi), ca, dzs, za)
+                    en = "[%s.x %s (%s.x / 2 + %s), %s.y + %s, %s]" % (cb, ns, sb, _num(hf), cb, dzfs, zb)
                 else:
-                    st = "[%s.x + %s, %s.y %s (%s.y / 2 + %s), zCinta]" % (ca, dzs, ca, sg, sa, _num(hi))
-                    en = "[%s.x + %s, %s.y %s (%s.y / 2 + %s), zCinta]" % (cb, dzfs, cb, ns, sb, _num(hf))
+                    st = "[%s.x + %s, %s.y %s (%s.y / 2 + %s), %s]" % (ca, dzs, ca, sg, sa, _num(hi), za)
+                    en = "[%s.x + %s, %s.y %s (%s.y / 2 + %s), %s]" % (cb, dzfs, cb, ns, sb, _num(hf), zb)
                 L += ['treenode %s = model().find("%s");' % (cv, n),
                       'treenode %s = model().find("%s");' % (a, o),
                       'treenode %s = model().find("%s");' % (b, d),

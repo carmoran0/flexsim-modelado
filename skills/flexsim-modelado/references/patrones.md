@@ -114,6 +114,12 @@ if (objectexists(c1) && objectexists(s1) && objectexists(d1)) {
 }
 ```
 
+- **Altura: cada extremo a la cara superior del objeto que une, no `zCinta = 0`.** Con la cinta
+  en el suelo y procesos de 2 m de alto, la cinta se ve pegada al suelo, contra el costado de
+  la máquina. Pon las máquinas a altura de mesa (`Size` z ≈ 1 m) y el extremo de la cinta en
+  `c.z + s.z` del objeto (`getLocation(0.5, 0.5, 0)` da la z de la base). Hacia una cola o
+  playa (0,2-0,3 m) la cinta baja en rampa. En el generador: `e.cinta_a_objetos = True`, y
+  `cinta_abs(..., z=(z_inicio, z_fin))` para las cintas entre puntos fijos.
 - **Cinta en `location = (0,0,0)` antes de fijar los extremos.** La ayuda no aclara si
   `StartLocation`/`EndLocation` son absolutos o relativos a la cinta; con la cinta en el origen
   da igual.
@@ -427,3 +433,63 @@ producto peligroso, cliente con requisitos propios), medido con un almacén de 1
   El pedido suma los suyos y los de sus palés en el Sink. Escaneo en cada cambio (5-15 s),
   precinto en expedición y una probabilidad de incidencia (lote retenido, fallo de escaneo) con
   su tiempo de bloqueo.
+
+## 14. Lecciones del modelo v9 (política de inventario, expedición con personas, cuellos ocultos)
+
+### 14.1 El balance de capacidad se hace por hora punta, puesto a puesto
+
+El balance diario de §10.1 no basta cuando la demanda llega en oleadas. En el almacén de ejemplo,
+un `Processor` de capacidad 1 por el que pasaban **todos** los pedidos (control de temperatura,
+30-120 s) daba unos 50 pedidos/h; al día sobraba (61 % de ocupación), pero la oleada trae 180
+pedidos/h. Ese puesto era un cuello de botella que nadie había señalado (se culpaba a la
+expedición): al limitarlo a los pedidos que lo necesitan, el OTIF subió 2 puntos (de 97,6 % a
+99,6 %, 10 réplicas pareadas) y los palés de frío fuera de límite bajaron del 3,3 % al 0,03 %.
+
+Cómo verlo: en los resultados, el **contenido máximo de la cinta o cola que alimenta** a cada
+puesto (aquí, 15 pedidos parados en la cinta colectora) y su ocupación en la hora punta, no la
+media del día. Pregunta de diseño: ¿de verdad pasa por este puesto todo lo que le llega?
+
+### 14.2 Puestos sin personas
+
+Un `Processor` con `MaxContent` = n representa n puestos **sin nadie**. Si el puesto real lo
+atiende una persona (muelle de expedición: precinto, firma, carga), el modelo sobrestima la
+capacidad y la conclusión cambia: con 4 muelles sin personas «hacía falta un quinto muelle»;
+con operarios, el quinto muelle no aporta nada y lo que manda es el número de operarios (3 en
+lugar de 4 hunden el servicio). Patrón: una cola (playa) con `UseTransport` hacia N `Processor`
+de capacidad 1 con `Pull`, y el mismo equipo de operarios como transporte y como operario de
+proceso.
+
+### 14.3 Prioridades en un Pull Requirement
+
+Para servir antes lo urgente sin ordenar la cola: cada puesto acepta un item solo si en la cola
+no hay otro sin asignar de mayor rango que él pueda aceptar. El item aceptado se marca con una
+etiqueta (`muelle`, `asignado_a`) para que la reevaluación no lo reparta dos veces. Es el patrón
+de «el frío primero» de las mesas de packing, generalizado a varios rangos y a puestos con
+restricciones (muelles ADR).
+
+### 14.4 Reposición con plazo de proveedor (punto de pedido sobre la posición de inventario)
+
+- Un `Source` genera **huecos de pedido** (revisiones), no camiones. En `SendToPort` se calcula la
+  posición de cada familia (stock libre + en camino − comprometido); si alguna cabe por debajo de
+  su nivel máximo S, el item se convierte en camión de esa familia y sale por el puerto 1; si no,
+  va por el puerto 2 a un `Sink`. Así entra lo que hace falta, no una cantidad fija al día.
+- El plazo de entrega es un `Processor` con `MaxContent` alto y `ProcessTime` = etiqueta del item.
+- S = stock objetivo en estantería + demanda durante el plazo. Si S no incluye la demanda del
+  plazo, el «mínimo» sale mayor que el «máximo» y la política es incoherente.
+- **Tubería inicial:** con plazo de un día, el primer día no llegaría nada. A t = 0 el mismo
+  `Source` crea los camiones «pedidos la víspera» (interarribo 0 mientras
+  `stats.output < N`) con un tránsito repartido por la ventana de llegadas.
+- Con oleadas, el stock de seguridad clásico (Z × σd × √L) es pequeño frente a lo que consume una
+  oleada: el stock objetivo necesita además una cobertura operativa (aquí, 2 días).
+
+### 14.5 Contadores por palé y stock inicial
+
+Un indicador que se acumula en el palé a lo largo de su vida (cambios de manos) sale sesgado si
+los palés del stock inicial empiezan en 0: con más stock inicial, el indicador baja sin que cambie
+nada. Los palés iniciales deben nacer con el valor que tendrían al llegar a la estantería.
+
+### 14.6 Una medida que no hace falta también es un resultado
+
+Antes de añadir capacidad, compara con réplicas pareadas. En el ejemplo se descartaron así un
+pulmón refrigerado y una sexta mesa de packing, y el quinto muelle quedó solo como reserva de
+campaña.
